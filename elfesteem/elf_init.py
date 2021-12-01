@@ -1,10 +1,10 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 import struct
 
-import cstruct
-import elf
-from strpatchwork import StrPatchwork
+from . import cstruct
+from . import elf
+from .strpatchwork import StrPatchwork
 import logging
 
 log = logging.getLogger("elfparse")
@@ -18,22 +18,24 @@ class test(type):
     pass
 
 
-class StructWrapper(object):
+class StructWrapperMeta(type):
 
-    class __metaclass__(type):
+    def __new__(cls, name, bases, dct):
+        wrapped = dct["wrapped"]
+        if wrapped is not None:  # XXX: make dct lookup look into base classes
+            for fname, v in wrapped._fields:
+                dct[fname] = property(dct.pop("get_" + fname,
+                                              lambda self, fname=fname: getattr(
+                                                  self.cstr, fname)),
+                                      dct.pop("set_" + fname,
+                                              lambda self, v, fname=fname: setattr(
+                                                  self.cstr, fname, v)),
+                                      dct.pop("del_" + fname, None))
+        return type.__new__(cls, name, bases, dct)
 
-        def __new__(cls, name, bases, dct):
-            wrapped = dct["wrapped"]
-            if wrapped is not None:  # XXX: make dct lookup look into base classes
-                for fname, v in wrapped._fields:
-                    dct[fname] = property(dct.pop("get_" + fname,
-                                                  lambda self, fname=fname: getattr(
-                                                      self.cstr, fname)),
-                                          dct.pop("set_" + fname,
-                                                  lambda self, v, fname=fname: setattr(
-                                                      self.cstr, fname, v)),
-                                          dct.pop("del_" + fname, None))
-            return type.__new__(cls, name, bases, dct)
+
+class StructWrapper(object, metaclass=StructWrapperMeta):
+
     wrapped = None
 
     def __init__(self, parent, sex, size, *args, **kargs):
@@ -161,32 +163,33 @@ class ContentManager(object):
 # Sections
 
 
-class Section(object):
+class SectionMeta(type):
+
+    def __new__(cls, name, bases, dct):
+        o = type.__new__(cls, name, bases, dct)
+        if name != "Section":
+            Section.register(o)
+        return o
+
+    def register(cls, o):
+        if o.sht is not None:
+            cls.sectypes[o.sht] = o
+
+    def __call__(cls, parent, sex, size, shstr=None):
+        sh = None
+        if shstr is not None:
+            sh = WShdr(None, sex, size, shstr)
+            if sh.type in Section.sectypes:
+                cls = Section.sectypes[sh.type]
+        i = cls.__new__(cls, cls.__name__, cls.__bases__, cls.__dict__)
+        if sh is not None:
+            sh.parent = i
+        i.__init__(parent, sh)
+        return i
+
+
+class Section(object, metaclass=SectionMeta):
     sectypes = {}
-
-    class __metaclass__(type):
-
-        def __new__(cls, name, bases, dct):
-            o = type.__new__(cls, name, bases, dct)
-            if name != "Section":
-                Section.register(o)
-            return o
-
-        def register(cls, o):
-            if o.sht is not None:
-                cls.sectypes[o.sht] = o
-
-        def __call__(cls, parent, sex, size, shstr=None):
-            sh = None
-            if shstr is not None:
-                sh = WShdr(None, sex, size, shstr)
-                if sh.type in Section.sectypes:
-                    cls = Section.sectypes[sh.type]
-            i = cls.__new__(cls, cls.__name__, cls.__bases__, cls.__dict__)
-            if sh is not None:
-                sh.parent = i
-            i.__init__(parent, sh)
-            return i
 
     content = ContentManager()
 
@@ -345,7 +348,7 @@ class StrTable(Section):
         index = 0
         l = len(c)
         while index < l:
-            p = c.find("\0", index)
+            p = c.find(b"\0", index)
             if p < 0:
                 log.warning("Missing trailing 0 for string [%s]" % c)  # XXX
                 p = len(c) - index
@@ -356,7 +359,7 @@ class StrTable(Section):
             # c = c[p+1:]
 
     def get_name(self, ofs):
-        n = self.content[ofs:self.content.find('\x00', offset=ofs)]
+        n = self.content[ofs:self.content.find(b'\x00', offset=ofs)]
         return n
 
     def add_name(self, name):
@@ -477,7 +480,7 @@ class SHList(object):
             self.do_add_section(s)
 
     def do_add_section(self, section):
-        n = section.sh.name
+        n = section.sh.name.decode('utf-8')
         if n.startswith("."):
             n = n[1:]
         n = n.replace(".", "_").replace("-", "_")
@@ -765,8 +768,8 @@ class ELF(object):
 
     def parse_content(self):
         h = self.content[:8]
-        self.size = ord(h[4]) * 32
-        self.sex = ord(h[5])
+        self.size = h[4] * 32
+        self.sex = h[5]
         self.Ehdr = WEhdr(self, self.sex, self.size, self.content)
         self.sh = SHList(self, self.sex, self.size)
         self.ph = PHList(self, self.sex, self.size)
@@ -801,7 +804,7 @@ class ELF(object):
 
     def getsectionbyname(self, name):
         for s in self.sh:
-            if s.sh.name.strip('\x00') == name:
+            if s.sh.name.strip(b'\x00') == name:
                 return s
         return None
 
@@ -819,5 +822,5 @@ if __name__ == "__main__":
     readline.parse_and_bind("tab: complete")
 
     e = ELF(open("/bin/ls").read())
-    print repr(e)
+    print(repr(e))
     # o = ELF(open("/tmp/svg-main.o").read())

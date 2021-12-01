@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 import struct
 
@@ -67,10 +67,10 @@ class CStruct(object):
         if kargs:
             self.__dict__.update(kargs)
         else:
-            s = ""
+            s = b""
             if args:
                 s = args[0]
-            s += "\x00" * self._size
+            s += b"\x00" * self._size
             s = s[:self._size]
             self._unpack(s)
 
@@ -114,10 +114,10 @@ class CStruct(object):
         return getattr(self, item)
 
     def _show(self):
-        print "##%s:" % self.__class__.__name__
+        print("##%s:" % self.__class__.__name__)
         fmt = "%%-%is = %%r" % max(map(lambda x: len(x[0]), self._fields))
         for fn, ft in self._fields:
-            print fmt % (fn, getattr(self, fn))
+            print(fmt % (fn, getattr(self, fn)))
 
 
 class CStructStruct:
