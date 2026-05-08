@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name = 'ELFEsteem',
-    version = '0.2.1-aies0',
+    version = '0.2.1+aies0',
     packages=['elfesteem'],
     scripts = ['elfcli'],
     # Metadata
